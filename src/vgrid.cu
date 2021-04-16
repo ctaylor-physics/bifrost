@@ -32,7 +32,7 @@ Implements the Romein convolutional algorithm onto a GPU using CUDA.
 
 */
 #include <iostream>
-#include <bifrost/romein.h>
+#include <bifrost/vgrid.h>
 #include "romein_kernels.cuh"
 
 #include "assert.hpp"
@@ -44,8 +44,6 @@ Implements the Romein convolutional algorithm onto a GPU using CUDA.
 #include "Complex.hpp"
 
 
-
-#define tile_grid_y 4//64
 
 #define MAX_THREADS_PER_BLOCK 128
 #define MIN_BLOCKS_PER_MP     4
@@ -82,11 +80,12 @@ inline Complex<RealType> Complexfcma(Complex<RealType> x, Complex<RealType> y, C
 template<typename InType, typename OutType>
 __global__ void 
 //__launch_bounds__(MAX_THREADS_PER_BLOCK, MIN_BLOCKS_PER_MP)
-romein_kernel_sloc(int   		       nbaseline,
+Vgrid_kernel(int   		       nbaseline,
 		   int   		       npol,
 		   int                         maxsupport, 
 		   int                         gridsize, 
 		   int                         nbatch,
+		   int                         nchan,
 		   const int* __restrict__     x,
 		   const int* __restrict__     y,
 		   const int* __restrict__     z,
@@ -106,10 +105,10 @@ romein_kernel_sloc(int   		       nbaseline,
 
     /// Dynamic allocation of shared memory
 
-    extern __shared__ int shared[];
+    extern __shared__ float shared[];
     
-    int* xdata = shared;
-    int* ydata = xdata + blk_y * npol;
+    float* xdata = shared;
+    float* ydata = xdata + blk_y * npol;
     
     /// Store X- and Y- Locations of Antennas within a thread-block in shared memory
 
@@ -122,46 +121,46 @@ romein_kernel_sloc(int   		       nbaseline,
     __syncthreads();
 
        int myU = illum_x% maxsupport; int myV = illum_x / maxsupport;
-       int grid_point_u = myU; int grid_point_v = myV;
+       float grid_point_u = myU; float grid_point_v = myV;
        OutType sum = OutType(0.0, 0.0);
   
        #pragma unroll
        for(int pol = 0; pol < npol;pol++) 
        {
                  
-	    int xl = xdata[tid_y*npol+pol]; 
-	    int yl = ydata[tid_y*npol+pol];
+	    float xl = xdata[tid_y*npol+pol]; 
+	    float yl = ydata[tid_y*npol+pol];
             // Determine convolution point. This is basically just an
             // optimised way to calculate.
-            int myConvU = 0; 
-	    int myConvV = 0;
+            float myConvU = 0.0; 
+	    float myConvV = 0.0;
             if( maxsupport > 1 ) 
 	    {
-                myConvU = (xl - myU) % maxsupport; myConvV = (yl - myV) % maxsupport;    
+                myConvU = (int(xl) - myU) % maxsupport; myConvV = (int(yl) - myV) % maxsupport;    
                 if (myConvU < 0) myConvU += maxsupport; if (myConvV < 0) myConvV += maxsupport;
             } 
             // Determine grid point. Because of the above we know here that
-           int myGridU = xl + myConvU; int myGridV = yl + myConvV;
+           float myGridU = xl + myConvU; float myGridV = yl + myConvV;
            
        	   // If grid-point changes for a given illumination pattern 
 
-           if (!(myGridU == grid_point_u && myGridV == grid_point_v)) 
+          if (!(myGridU == grid_point_u && myGridV == grid_point_v)) 
+	  //if(!((myGridU<grid_point_u+0.5)&&(myGridU>=grid_point_u-0.5)&&(myGridV<grid_point_v+0.5)&&(myGridU>=grid_point_u-0.5)))
 	   { // Atomic add to grid is now removed from this kernel after careful examining and consideration for race-conditions
                if( grid_point_u >= 0 && grid_point_u < gridsize && \
                     grid_point_v >= 0 && grid_point_v < gridsize ) 
 	        {
-                       d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].x+= sum.x;
-                       d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].y+= sum.y;   
+                       d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].x+= sum.x;
+                       d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].y+= sum.y;   
                 //    atomicAdd(&d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].x, sum.x);
                 //    atomicAdd(&d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].y, sum.y);
                 }
-                // Switch to new point
+	        // Switch to new point
                 sum = OutType(0.0, 0.0);
                 grid_point_u = myGridU; grid_point_v = myGridV;
            }
-            
             //TODO: Re-do the w-kernel/gcf for our data.
-            OutType px = kernels[((bid_z*blk_y+tid_y)*npol+vi_s+pol)*maxsupport*maxsupport + myConvV * maxsupport + myConvU];
+            OutType px = kernels[((bid_z*blk_y+tid_y)*npol+vi_s+pol)*maxsupport*maxsupport + int(myConvV) * maxsupport + int(myConvU)];
             // Sum up
             InType temp = d_in[(bid_z*blk_y+tid_y)*npol+vi_s+pol];
             OutType vi_v = OutType(temp.x, temp.y);
@@ -172,26 +171,28 @@ romein_kernel_sloc(int   		       nbaseline,
             if( grid_point_u >= 0 && grid_point_u < gridsize && \
                 grid_point_v >= 0 && grid_point_v < gridsize ) 
 	    {
-	       d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].x+= sum.x;
-               d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].y+= sum.y;
+	       d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].x+= sum.x;
+               d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].y+= sum.y;
       
 //              atomicAdd(&d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].x, sum.x);
 //              atomicAdd(&d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].y, sum.y);
-            }
+           }
+	__syncthreads();
        }/// End of polarization loop
-    __syncthreads();
+  //  __syncthreads();
  }
 
 template<typename InType, typename OutType>
-inline void launch_romein_kernel(int      nbaseline,
+inline void launch_grid_kernel(int      nbaseline,
                                  int      npol,
                                  bool     polmajor,
                                  int      maxsupport, 
                                  int      gridsize, 
                                  int      nbatch,
-                                 int*     xpos,
-                                 int*     ypos,
-                                 int*     zpos,
+                                 int      nchan,
+				 float*     xpos,
+                                 float*     ypos,
+                                 float*     zpos,
                                  OutType* kernels,
                                  InType*  d_in,
                                  OutType* d_out,
@@ -201,36 +202,34 @@ inline void launch_romein_kernel(int      nbaseline,
     cudaError_t error;
     error = cudaGetDeviceProperties(&dev, 0);
     if(error != cudaSuccess) printf("Error: %s\n", cudaGetErrorString(error));
-    int blk_cnt ;
     int block_x=maxsupport*maxsupport ;
-    int tile_y ;
-    if(block_x==1)tile_y=std::min(nbaseline,dev.maxThreadsPerBlock/2);
-    else tile_y = std::min((int)nbaseline/block_x,dev.maxThreadsPerBlock/2);
-    int tile_grid_z=nbaseline/tile_y ;
-    dim3 block(block_x,tile_y);
-    if(polmajor){ blk_cnt = (nbatch*npol)/tile_grid_y;
-	     npol=1; }
-    else blk_cnt = nbatch/ tile_grid_y;
-    dim3 grid(blk_cnt,tile_grid_y,tile_grid_z);
+    int block_y ;
+    if(block_x==1)block_y=std::min(nbaseline,dev.maxThreadsPerBlock/2);
+    else block_y = std::min((int)nbaseline/block_x,dev.maxThreadsPerBlock/2);
+    int grid_z=nbaseline/block_y ;
+    dim3 block(block_x,block_y);
+    if(polmajor)npol=1;
+    dim3 grid(nbatch, nchan, grid_z);
     
     void* args[] = {&nbaseline,
                     &npol,
                     &maxsupport,
                     &gridsize, 
                     &nbatch,
+		    &nchan,
                     &xpos,
                     &ypos,
                     &zpos,
                     &kernels,
                     &d_in,
                     &d_out};
-    size_t loc_size = 2 * block.y * npol * sizeof(int);
-    BF_CHECK_CUDA_EXCEPTION(cudaLaunchKernel((void*)romein_kernel_sloc<InType,OutType>,
+    size_t loc_size = 2 * block.y * npol * sizeof(float);
+    BF_CHECK_CUDA_EXCEPTION(cudaLaunchKernel((void*)Vgrid_kernel<InType,OutType>,
 						 grid, block,&args[0], loc_size, stream),BF_STATUS_INTERNAL_ERROR);
     
 }
 
-class BFromein_impl {
+class BFVGrid_impl {
     typedef int    IType;
     typedef double FType;
 public: // HACK WAR for what looks like a bug in the CUDA 7.0 compiler
@@ -242,15 +241,15 @@ private:
     IType        _maxsupport;
     IType        _gridsize;
     IType        _nxyz = 0;
-    int*         _x = NULL;
-    int*         _y = NULL;
-    int*         _z = NULL;    
+    float*         _x = NULL;
+    float*         _y = NULL;
+    float*         _z = NULL;    
     IType        _nkernels = 0;
     BFdtype      _tkernels = BF_DTYPE_INT_TYPE;
     void*        _kernels = NULL;
     cudaStream_t _stream;
 public:
-    BFromein_impl() : _nbaseline(1), _npol(1), _polmajor(true), \
+    BFVGrid_impl() : _nbaseline(1), _npol(1), _polmajor(true), \
                       _maxsupport(1), _stream(g_cuda_stream) {}
     inline IType nbaseline()  const { return _nbaseline;  }
     inline IType npol()       const { return _npol;       }
@@ -286,7 +285,7 @@ public:
 	stride *= positions->shape[positions->ndim-2];
 	stride *= positions->shape[positions->ndim-1];
 	_nxyz = npositions;
-        _x = (int *) positions->data;
+        _x = (float *) positions->data;
         _y = _x + stride;
         _z = _y + stride;
     }
@@ -305,7 +304,7 @@ public:
         _tkernels = kernels->dtype;
         _kernels = (void*) kernels->data;
     }
-    void execute(BFarray const* in, BFarray const* out) {
+    void execute(BFarray const* in, BFarray const* out, int nbatch, int nchan) {
         BF_TRACE();
         BF_TRACE_STREAM(_stream);
         BF_ASSERT_EXCEPTION(_x != NULL, BF_STATUS_INVALID_STATE);
@@ -317,10 +316,9 @@ public:
         
         BF_CHECK_CUDA_EXCEPTION(cudaGetLastError(), BF_STATUS_INTERNAL_ERROR);
         
-        int nbatch = in->shape[0];
-        
-#define LAUNCH_ROMEIN_KERNEL(IterType,OterType) \
-        launch_romein_kernel(_nbaseline, _npol, _polmajor, _maxsupport, _gridsize, nbatch, \
+               
+#define LAUNCH_GRID_KERNEL(IterType,OterType) \
+        launch_grid_kernel(_nbaseline, _npol, _polmajor, _maxsupport, _gridsize, nbatch, nchan, \
                              _x, _y, _z, (OterType)_kernels,		\
                              (IterType)in->data, (OterType)out->data, \
                              _stream)
@@ -329,63 +327,63 @@ public:
             case BF_DTYPE_CI4:
                 if( in->big_endian ) {
                     switch( out->dtype ) {
-                        case BF_DTYPE_CF32: LAUNCH_ROMEIN_KERNEL(nibble2*, Complex32*);  break;
-                        case BF_DTYPE_CF64: LAUNCH_ROMEIN_KERNEL(nibble2*, Complex64*);  break;
+                        case BF_DTYPE_CF32: LAUNCH_GRID_KERNEL(nibble2*, Complex32*);  break;
+                        case BF_DTYPE_CF64: LAUNCH_GRID_KERNEL(nibble2*, Complex64*);  break;
                         default: BF_ASSERT_EXCEPTION(false, BF_STATUS_UNSUPPORTED_DTYPE);
                     };
                 } else {
                     switch( out->dtype ) {
-                        case BF_DTYPE_CF32: LAUNCH_ROMEIN_KERNEL(blenib2*, Complex32*);  break;
-                        case BF_DTYPE_CF64: LAUNCH_ROMEIN_KERNEL(blenib2*, Complex64*);  break;
+                        case BF_DTYPE_CF32: LAUNCH_GRID_KERNEL(blenib2*, Complex32*);  break;
+                        case BF_DTYPE_CF64: LAUNCH_GRID_KERNEL(blenib2*, Complex64*);  break;
                         default: BF_ASSERT_EXCEPTION(false, BF_STATUS_UNSUPPORTED_DTYPE);
                     };
                 }
                 break;
             case BF_DTYPE_CI8:
                 switch( out->dtype ) {
-                    case BF_DTYPE_CF32: LAUNCH_ROMEIN_KERNEL(char2*, Complex32*);  break;
-                    case BF_DTYPE_CF64: LAUNCH_ROMEIN_KERNEL(char2*, Complex64*);  break;
+                    case BF_DTYPE_CF32: LAUNCH_GRID_KERNEL(char2*, Complex32*);  break;
+                    case BF_DTYPE_CF64: LAUNCH_GRID_KERNEL(char2*, Complex64*);  break;
                     default: BF_ASSERT_EXCEPTION(false, BF_STATUS_UNSUPPORTED_DTYPE);
                 };
                 break;
             case BF_DTYPE_CI16:
                 switch( out->dtype ) {
-                    case BF_DTYPE_CF32: LAUNCH_ROMEIN_KERNEL(short2*, Complex32*); break;
-                    case BF_DTYPE_CF64: LAUNCH_ROMEIN_KERNEL(short2*, Complex64*); break;
+                    case BF_DTYPE_CF32: LAUNCH_GRID_KERNEL(short2*, Complex32*); break;
+                    case BF_DTYPE_CF64: LAUNCH_GRID_KERNEL(short2*, Complex64*); break;
                     default: BF_ASSERT_EXCEPTION(false, BF_STATUS_UNSUPPORTED_DTYPE);
                 }
                 break;
             case BF_DTYPE_CI32:
                 switch( out->dtype ) {
-                    case BF_DTYPE_CF32: LAUNCH_ROMEIN_KERNEL(int2*, Complex32*); break;
-                    case BF_DTYPE_CF64: LAUNCH_ROMEIN_KERNEL(int2*, Complex64*); break;
+                    case BF_DTYPE_CF32: LAUNCH_GRID_KERNEL(int2*, Complex32*); break;
+                    case BF_DTYPE_CF64: LAUNCH_GRID_KERNEL(int2*, Complex64*); break;
                     default: BF_ASSERT_EXCEPTION(false, BF_STATUS_UNSUPPORTED_DTYPE);
                 }
                 break;
             case BF_DTYPE_CI64:
                 switch( out->dtype ) {
-                    case BF_DTYPE_CF32: LAUNCH_ROMEIN_KERNEL(long2*, Complex32*); break;
-                    case BF_DTYPE_CF64: LAUNCH_ROMEIN_KERNEL(long2*, Complex64*); break;
+                    case BF_DTYPE_CF32: LAUNCH_GRID_KERNEL(long2*, Complex32*); break;
+                    case BF_DTYPE_CF64: LAUNCH_GRID_KERNEL(long2*, Complex64*); break;
                     default: BF_ASSERT_EXCEPTION(false, BF_STATUS_UNSUPPORTED_DTYPE);
                 }
                 break;
             case BF_DTYPE_CF32:
                 switch( out->dtype ) {
-                    case BF_DTYPE_CF32: LAUNCH_ROMEIN_KERNEL(float2*, Complex32*);   break;
-                    case BF_DTYPE_CF64: LAUNCH_ROMEIN_KERNEL(float2*, Complex64*);   break;
+                    case BF_DTYPE_CF32: LAUNCH_GRID_KERNEL(float2*, Complex32*);   break;
+                    case BF_DTYPE_CF64: LAUNCH_GRID_KERNEL(float2*, Complex64*);   break;
                     default: BF_ASSERT_EXCEPTION(false, BF_STATUS_UNSUPPORTED_DTYPE);
                 }
                 break;
             case BF_DTYPE_CF64:
                 switch( out->dtype ) {
-                    case BF_DTYPE_CF32: LAUNCH_ROMEIN_KERNEL(double2*, Complex32*);  break;
-                    case BF_DTYPE_CF64: LAUNCH_ROMEIN_KERNEL(double2*, Complex64*);  break;
+                    case BF_DTYPE_CF32: LAUNCH_GRID_KERNEL(double2*, Complex32*);  break;
+                    case BF_DTYPE_CF64: LAUNCH_GRID_KERNEL(double2*, Complex64*);  break;
                     default: BF_ASSERT_EXCEPTION(false, BF_STATUS_UNSUPPORTED_DTYPE);
                 }
                 break;
             default: BF_ASSERT_EXCEPTION(false, BF_STATUS_UNSUPPORTED_DTYPE);
         }
-#undef LAUNCH_ROMEIN_KERNEL
+#undef LAUNCH_GRID_KERNEL
         
         BF_CHECK_CUDA_EXCEPTION(cudaGetLastError(), BF_STATUS_INTERNAL_ERROR);
     }
@@ -394,14 +392,14 @@ public:
     }
 };
 
-BFstatus bfRomeinCreate(BFromein* plan_ptr) {
+BFstatus bfVGridCreate(BFvgrid* plan_ptr) {
     BF_TRACE();
     BF_ASSERT(plan_ptr, BF_STATUS_INVALID_POINTER);
-    BF_TRY_RETURN_ELSE(*plan_ptr = new BFromein_impl(),
+    BF_TRY_RETURN_ELSE(*plan_ptr = new BFVGrid_impl(),
                        *plan_ptr = 0);
 }
 
-BFstatus bfRomeinInit(BFromein       plan,
+BFstatus bfVGridInit(BFvgrid       plan,
                       BFarray const* positions,
                       BFarray const* kernels,
                       BFsize         gridsize,
@@ -450,14 +448,14 @@ BFstatus bfRomeinInit(BFromein       plan,
     BF_TRY(plan->set_positions(positions));
     BF_TRY_RETURN(plan->set_kernels(kernels));
 }
-BFstatus bfRomeinSetStream(BFromein    plan,
+BFstatus bfVGridSetStream(BFvgrid    plan,
                            void const* stream) {
     BF_TRACE();
     BF_ASSERT(plan, BF_STATUS_INVALID_HANDLE);
     BF_ASSERT(stream, BF_STATUS_INVALID_POINTER);
     BF_TRY_RETURN(plan->set_stream(*(cudaStream_t*)stream));
 }
-BFstatus bfRomeinSetPositions(BFromein       plan,
+BFstatus bfVGridSetPositions(BFvgrid       plan,
                               BFarray const* positions) {
     BF_ASSERT(plan, BF_STATUS_INVALID_HANDLE);
     BF_ASSERT(positions,            BF_STATUS_INVALID_POINTER);
@@ -474,7 +472,7 @@ BFstatus bfRomeinSetPositions(BFromein       plan,
     
     BF_TRY_RETURN(plan->set_positions(positions));
 }
-BFstatus bfRomeinSetKernels(BFromein       plan, 
+BFstatus bfVGridSetKernels(BFvgrid       plan, 
                             BFarray const* kernels) {
     BF_ASSERT(plan, BF_STATUS_INVALID_HANDLE);
     BF_ASSERT(kernels,            BF_STATUS_INVALID_POINTER);
@@ -492,7 +490,7 @@ BFstatus bfRomeinSetKernels(BFromein       plan,
     
     BF_TRY_RETURN(plan->set_kernels(kernels));
 }
-BFstatus bfRomeinExecute(BFromein          plan,
+BFstatus bfVGridExecute(BFvgrid          plan,
                          BFarray const* in,
                          BFarray const* out) {
     BF_TRACE();
@@ -502,6 +500,10 @@ BFstatus bfRomeinExecute(BFromein          plan,
     BF_ASSERT( in->ndim >= 3,          BF_STATUS_INVALID_SHAPE);
     BF_ASSERT(out->ndim == in->ndim+1, BF_STATUS_INVALID_SHAPE);
     
+    int nbatch = in->shape[0];
+    int nchan = in->shape[1];
+
+
     BFarray in_flattened;
     if( in->ndim > 3 ) {
         // Keep the last two dim but attempt to flatten all others
@@ -572,10 +574,10 @@ BFstatus bfRomeinExecute(BFromein          plan,
     
     BF_ASSERT(space_accessible_from( in->space, BF_SPACE_CUDA), BF_STATUS_INVALID_SPACE);
     BF_ASSERT(space_accessible_from(out->space, BF_SPACE_CUDA), BF_STATUS_INVALID_SPACE);
-    BF_TRY_RETURN(plan->execute(in, out));
+    BF_TRY_RETURN(plan->execute(in, out, nbatch, nchan));
 }
 
-BFstatus bfRomeinDestroy(BFromein plan) {
+BFstatus bfVGridDestroy(BFvgrid plan) {
     BF_TRACE();
     BF_ASSERT(plan, BF_STATUS_INVALID_HANDLE);
     delete plan;

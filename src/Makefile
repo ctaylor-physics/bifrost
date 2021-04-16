@@ -28,6 +28,11 @@ endif
 ifndef NOCUDA
   # These files require the CUDA Toolkit to compile
   LIBBIFROST_OBJS += \
+  xCorr.o \
+  aCorr.o \
+  vgrid.o \
+  GMul.o \
+  fft_shift.o \
   transpose.o \
   fft.o \
   fft_kernels.o \
