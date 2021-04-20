@@ -100,111 +100,60 @@ inline Complex<RealType> ComplexMul(Complex<RealType> x, Complex<RealType> y, Co
 }
 
 template<typename In, typename Out>
-__global__ void ACorr(int nbaseline, int npol, int nbatch,
-		     In* d_in,//cudaTextureObject_t   data_in,//In* d_in,
+__global__ void ACorr(int nbaseline, int npol, int nbatch, int nchan,
+		     In* d_in,
 		     Out* d_out){
 
-        int bid_x = blockIdx.x, bid_y = blockIdx.y ;
+        int bid_x = blockIdx.x, bid_y = blockIdx.y, bid_z = blockIdx.z ;
         int blk_x = blockDim.x;
-        int grid_x = gridDim.x, grid_y = gridDim.y ;
+        int grid_x = gridDim.x, grid_y = gridDim.y, grid_z = gridDim.z ;
         int tid_x = threadIdx.x ;
-        int pol_skip = grid_y*blk_x;
-// Making use of shared memory for faster memory accesses by the threads
-
-/*        extern __shared__  float2 shared[] ;
-        float2* xx=shared;      
-        float2* yy=xx+ blk_x;
-*/
+        int pol_skip = grid_z*blk_x;
+       // Making use of shared memory for faster memory accesses by the threads
         
 	extern  __shared__ float2 shared[] ;
         In* xx = reinterpret_cast<In *>(shared);
-        In* yy= xx+ blk_x; 
-	  
+        In* yy= xx + blk_x; 	
 
-// Access pattern is such that coaelescence is achieved both for read and writes to global and shared memory
-        int bid1= bid_x*npol*pol_skip + bid_y*blk_x ;
-	int bid2 = bid_x*pol_skip*npol*npol+bid_y*blk_x;
-	// Reading texture cache as 2D with 1D thread-block indexing and copying it to shared memory
-	xx[tid_x]=d_in[bid1+tid_x];// tex1Dfetch<float2>(data_in, bid1+tid_x); 
-        yy[tid_x]=d_in[bid1+pol_skip+tid_x];// tex1Dfetch<float2>(data_in, bid1+pol_skip+tid_x);
+        // Access pattern is such that coaelescence is achieved both for read and writes to global and shared memory
+        int bid1 =  ((bid_x * grid_y + bid_y ) * npol * grid_z + bid_z) * blk_x;
+	int bid2 =  ((bid_x * grid_y + bid_y ) * npol * npol * grid_z + bid_z) * blk_x ;
+	
+	for (int i = 0;i<(npol*npol);i++){
+			
+		xx[tid_x]=d_in[bid1+i/2*pol_skip+tid_x];
+        	yy[tid_x]=d_in[bid1+i%2*pol_skip+tid_x];
 
-// Estimate polarizations to estimate XX*, YY*, XY*		
-        d_out[bid2+tid_x].x=xx[tid_x].x*xx[tid_x].x+xx[tid_x].y*xx[tid_x].y;
-	d_out[bid2+tid_x].y=0;
-	d_out[bid2+pol_skip+tid_x].x=yy[tid_x].x*yy[tid_x].x+yy[tid_x].y*yy[tid_x].y;
-	d_out[bid2+pol_skip+tid_x].y=0;
-        d_out[bid2+2*pol_skip+tid_x].x +=  xx[tid_x].x*yy[tid_x].x + xx[tid_x].y*yy[tid_x].y;
-      	d_out[bid2+2*pol_skip+tid_x].y +=  xx[tid_x].y*yy[tid_x].x - xx[tid_x].x*yy[tid_x].y;   
-	 __syncthreads();
-//  YX* is the same as XY*; just negate the imaginary part
-   	 d_out[bid2+3*pol_skip+tid_x].x=d_out[bid2+2*pol_skip+tid_x].x;  
-         d_out[bid2+3*pol_skip+tid_x].y=(-1)*d_out[bid2+2*pol_skip+tid_x].y;
+                d_out[bid2+i*pol_skip+tid_x].x +=  xx[tid_x].x*yy[tid_x].x + xx[tid_x].y*yy[tid_x].y;
+          	d_out[bid2+i*pol_skip+tid_x].y +=  xx[tid_x].y*yy[tid_x].x - xx[tid_x].x*yy[tid_x].y;   
+	}
+       	__syncthreads();
 }
  
 template<typename In, typename Out>
-inline void launch_acorr_kernel(int nbaseline, int npol, bool polmajor, int nbatch,
+inline void launch_acorr_kernel(int nantennas, int npol, bool polmajor, int nbatch, int nchan,
                                In*  d_in,
                                Out* d_out,
                                cudaStream_t stream=0) {
     cudaDeviceProp dev;
     cudaError_t error;
     error = cudaGetDeviceProperties(&dev, 0);
-     if(error != cudaSuccess)
-     {
-        printf("Error: %s\n", cudaGetErrorString(error));
-      }
-     size_t thread_bound = dev.maxThreadsPerBlock;
-     size_t tile_grid_y = nbaseline/tile;
+    if(error != cudaSuccess) printf("Error: %s\n", cudaGetErrorString(error));
+    int block_x=std::min(nantennas,dev.maxThreadsPerBlock/2);
+    int grid_z=nantennas/block_x ;
+    dim3 block(block_x,1);
+    if(polmajor)npol=1;
+    dim3 grid(nbatch, nchan, grid_z);
 
-
-    dim3 block(tile,1); /// Flattened one-D to reduce indexing arithmetic
-    dim3 grid(nbatch,tile_grid_y);// 2D grid for time, frequency and antennas
-    
-/*
-
-
-    // Determine how to create the texture object
-    // NOTE:  Assumes some type of complex float
-    cudaChannelFormatKind channel_format = cudaChannelFormatKindFloat;
-    int dx = 32;
-    int dy = 32;
-    int dz = 0;
-    int dw = 0;
-    if( sizeof(In) == sizeof(Complex64) )
-    {
-        channel_format = cudaChannelFormatKindUnsigned;
-        dz = 32;
-        dw = 32;
-    }
-    // Create texture object
-    cudaResourceDesc resDesc;
-    memset(&resDesc, 0, sizeof(resDesc));
-    resDesc.resType = cudaResourceTypeLinear;
-    resDesc.res.linear.devPtr = d_in;
-    //resDesc.res.linear.desc = cudaCreateChannelDesc<In>(); //cudaCreateChannelDesc( 32, 32, 0, 0, cudaChannelFormatKindFloat );
-    
-    resDesc.res.linear.desc.f = channel_format;
-    resDesc.res.linear.desc.x = dx;
-    resDesc.res.linear.desc.y = dy;
-    resDesc.res.linear.desc.z = dz;
-    resDesc.res.linear.desc.w = dw;
-    resDesc.res.linear.sizeInBytes = nbaseline*npol*nbatch*sizeof(In);
-
-    cudaTextureDesc texDesc;
-    memset(&texDesc, 0, sizeof(texDesc));
-    texDesc.readMode = cudaReadModeElementType;
-
-    cudaTextureObject_t data_in;
-    BF_CHECK_CUDA_EXCEPTION(cudaCreateTextureObject(&data_in, &resDesc, &texDesc, NULL), BF_STATUS_INTERNAL_ERROR);
-
-
-*/
-    void* args[] = {&nbaseline,
+      
+    void* args[] = {&nantennas,
 	            &npol,
                     &nbatch,
-		    &d_in,//&data_in,
+		    &nchan,
+		    &d_in,
                     &d_out};
-     size_t loc_size=int(npol)*block.x; // Shared memory size to be allocated for the kernel
+     size_t loc_size=2 * block.x * sizeof(float2);
+; // Shared memory size to be allocated for the kernel
 	BF_CHECK_CUDA_EXCEPTION(cudaLaunchKernel((void*)ACorr<In,Out>,
 						 grid, block,
 						 &args[0], loc_size*sizeof(float2), stream),BF_STATUS_INTERNAL_ERROR);
@@ -223,36 +172,34 @@ public: // HACK WAR for what looks like a bug in the CUDA 7.0 compiler
     typedef float  DType;
 
 private:
-    IType        _nbaseline;
+    IType        _nantenna;
     IType        _npol;
     bool         _polmajor;
     cudaStream_t _stream;
 public:
-    BFaCorr_impl() : _nbaseline(1), _npol(1), _polmajor(true), \
+    BFaCorr_impl() : _nantenna(1), _npol(1), _polmajor(true), \
                       _stream(g_cuda_stream) {}
-    inline IType nbaseline()  const { return _nbaseline;  }
+    inline IType nantenna()  const { return _nantenna;  }
     inline IType npol()       const { return _npol;       }
     inline bool polmajor()    const { return _polmajor;   }
-    void init(IType nbaseline,
+    void init(IType nantenna,
               IType npol,
               bool  polmajor) {
         BF_TRACE();
-        _nbaseline  = nbaseline;
+        _nantenna  = nantenna;
         _npol       = npol;
         _polmajor   = polmajor;
     }
-   void execute(BFarray const* in, BFarray const* out) {
+   void execute(BFarray const* in, BFarray const* out, int nbatch, int nchan) {
         BF_TRACE();
         BF_TRACE_STREAM(_stream);
         BF_ASSERT_EXCEPTION(out->dtype == BF_DTYPE_CF32 \
                                           || BF_DTYPE_CF64, BF_STATUS_UNSUPPORTED_DTYPE);
         
         BF_CHECK_CUDA_EXCEPTION(cudaGetLastError(), BF_STATUS_INTERNAL_ERROR);
-        
-        int nbatch = in->shape[1]*in->shape[2];
-        
+               
 #define LAUNCH_ACORR_KERNEL(IterType,OterType) \
-        launch_acorr_kernel(_nbaseline, _npol, _polmajor, nbatch, \
+        launch_acorr_kernel(_nantenna, _npol, _polmajor, nbatch, nchan,\
                              (IterType)in->data, (OterType)out->data, \
                              _stream)
         
@@ -343,21 +290,20 @@ BFstatus bfaCorrInit(BFacorr       plan,
     BF_ASSERT(space_accessible_from(positions->space, BF_SPACE_CUDA), BF_STATUS_INVALID_SPACE);
     
     // Discover the dimensions of the positions/kernels.
-    int npositions, nbaseline, npol;
+    int npositions, nantenna, npol;
     npositions = positions->shape[1];
     for(int i=2; i<positions->ndim-2; ++i) {
         npositions *= positions->shape[i];
     }
     if( polmajor ) {
          npol = positions->shape[positions->ndim-2];
-         nbaseline = positions->shape[positions->ndim-1];
+         nantenna = positions->shape[positions->ndim-1];
     } else {
-        nbaseline = positions->shape[positions->ndim-2];
+        nantenna = positions->shape[positions->ndim-2];
         npol = positions->shape[positions->ndim-1];
     }
-
     // Validate
-    BF_TRY_RETURN(plan->init(nbaseline, npol, polmajor));
+    BF_TRY_RETURN(plan->init(nantenna, npol, polmajor));
 }
 BFstatus bfaCorrSetStream(BFacorr    plan,
                            void const* stream) {
@@ -377,6 +323,9 @@ BFstatus bfaCorrExecute(BFacorr          plan,
     BF_ASSERT( in->ndim >= 3,          BF_STATUS_INVALID_SHAPE);
     BF_ASSERT(out->ndim == in->ndim, BF_STATUS_INVALID_SHAPE);
 
+    int nbatch = in->shape[0];
+    int nchan  = in->shape[1];
+       
     BFarray in_flattened;
     if( in->ndim > 3 ) {
         // Keep the last two dim but attempt to flatten all others
@@ -391,9 +340,9 @@ BFstatus bfaCorrExecute(BFacorr          plan,
 
     if( plan->polmajor() ) {
         BF_ASSERT( in->shape[1] == plan->npol(),      BF_STATUS_INVALID_SHAPE);
-        BF_ASSERT( in->shape[2] == plan->nbaseline(), BF_STATUS_INVALID_SHAPE);
+        BF_ASSERT( in->shape[2] == plan->nantenna(), BF_STATUS_INVALID_SHAPE);
     } else {
-        BF_ASSERT( in->shape[1] == plan->nbaseline(), BF_STATUS_INVALID_SHAPE);
+        BF_ASSERT( in->shape[1] == plan->nantenna(), BF_STATUS_INVALID_SHAPE);
         BF_ASSERT( in->shape[2] == plan->npol(),      BF_STATUS_INVALID_SHAPE);
     }
 
@@ -410,33 +359,11 @@ BFstatus bfaCorrExecute(BFacorr          plan,
         out  =  &out_flattened;
         BF_ASSERT(out_flattened.ndim == 3, BF_STATUS_UNSUPPORTED_SHAPE);
     }
-  /*  cout << "Input Dimension : " << in_flattened.ndim << " Output Dimension :  " << out_flattened.ndim << endl ;
-
-     //  BF_ASSERT( out->shape[1] == plan->npol()**2,      BF_STATUS_INVALID_SHAPE);
-  // cout << out->shape[0] << "  " << out->shape[1] << "  " << out->shape[2] << "  " << out->shape[3] << endl ;
-//   cout <<  in->shape[0] << "  " << in->shape[1] << "  " << in->shape[2]  << "  " << in->shape[3] << "  " << in->shape[4] << "  " << in->shape[5] << endl ;
-
-
-    std::cout << "OUT ndim = " << out->ndim << std::endl;
-    std::cout << "   0 = " << out->shape[0] << std::endl;
-     std::cout << "   1 = " << out->shape[1] << std::endl;
-    std::cout << "   2 = " << out->shape[2] << std::endl;
-     std::cout << "   3 = " << out->shape[3] << std::endl;
-
-    std::cout << "IN ndim = " << in->ndim << std::endl;
-    std::cout << "   0 = " << in->shape[0] << std::endl;
-    std::cout << "   1 = " << in->shape[1] << std::endl;
-    std::cout << "   2 = " << in->shape[2] << std::endl;
-    std::cout << "   3 = " << in->shape[3] << std::endl;
-*/
-   
-     BF_ASSERT(space_accessible_from( in->space, BF_SPACE_CUDA), BF_STATUS_INVALID_SPACE);
-   // cout<<"Memory accessible from " << space_accessible_from( in->space, BF_SPACE_CUDA)<<endl ;
+ 
+    BF_ASSERT(space_accessible_from( in->space, BF_SPACE_CUDA), BF_STATUS_INVALID_SPACE);
     BF_ASSERT(space_accessible_from(out->space, BF_SPACE_CUDA), BF_STATUS_INVALID_SPACE);
-   // cout<<"Memory accessible for output " <<space_accessible_from(out->space, BF_SPACE_CUDA) << endl;
-    BF_TRY_RETURN(plan->execute(in, out));
+    BF_TRY_RETURN(plan->execute(in, out, nbatch, nchan));
 }
-
 BFstatus bfaCorrDestroy(BFacorr plan) {
     BF_TRACE();
     BF_ASSERT(plan, BF_STATUS_INVALID_HANDLE);
