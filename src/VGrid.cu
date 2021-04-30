@@ -273,7 +273,7 @@ public:
     void set_positions(BFarray const* positions) { 
         BF_TRACE();
         BF_TRACE_STREAM(_stream);
-        BF_ASSERT_EXCEPTION(positions->dtype == BF_DTYPE_I32, BF_STATUS_UNSUPPORTED_DTYPE);
+        //BF_ASSERT_EXCEPTION(positions->dtype == BF_DTYPE_I32, BF_STATUS_UNSUPPORTED_DTYPE);
         
         int npositions = positions->shape[1];
         int stride = positions->shape[1];
@@ -501,7 +501,6 @@ BFstatus bfVGridExecute(BFvgrid          plan,
     
     int nbatch = in->shape[0];
     int nchan = in->shape[1];
-
 
     BFarray in_flattened;
     if( in->ndim > 3 ) {

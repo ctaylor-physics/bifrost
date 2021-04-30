@@ -18,11 +18,11 @@ else
 endif
 
 ifndef INSTALL_LIB_DIR
-	INSTALL_LIB_DIR = /usr/local/lib
+	INSTALL_LIB_DIR = /home/epic/anaconda/lib/
 endif
 
 ifndef INSTALL_INC_DIR
-	INSTALL_INC_DIR = /usr/local/include
+	INSTALL_INC_DIR = /home/epic/anaconda/include/
 endif
 
 BIFROST_NAME          = bifrost

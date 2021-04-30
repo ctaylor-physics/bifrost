@@ -50,11 +50,33 @@ __global__ void XGrid_kernel(int npol, int gridsize, int nbatch, int nchan,
         extern  __shared__ Complex<float> shared[] ;
         In* xx = reinterpret_cast<In *>(shared);
         In* yy = xx + blk_x;
-
-	int tt = 1;
+ 
+        int tt = 1;
         if(npol>1) tt=(int)npol/2;
+        
+	/*switch(npol){
+	
+		case 1: int bid = ((bid_x * grid_y + bid_y) * npol  * grid_z  + bid_z) * blk_x ;
+			xx[tid_x] = d_in[bid+tid_x];
+                        d_out[bid+tid_x].x += xx[tid_x].x*xx[tid_x].x + xx[tid_x].y*xx[tid_x].y;
+                        d_out[bid+tid_x].y += 0;
+			__syncthreads();break;
+   
+	        default: int bid1  = ((bid_x * grid_y + bid_y) * (int)npol/2  * grid_z  + bid_z) * blk_x ;
+                         int bid2 = ((bid_x * grid_y + bid_y) * npol * grid_z  + bid_z) * blk_x ;
+                         #pragma unroll
+                         for(int i=0;i<npol;i++){
 
-	int bid  = ((bid_x * grid_y + bid_y) * tt  * grid_z  + bid_z) * blk_x ;
+                           xx[tid_x] = d_in[bid1+i/2*pol_skip+tid_x];
+                           yy[tid_x] = d_in[bid1+i%2*pol_skip+tid_x];
+
+                           d_out[bid2+i*pol_skip+tid_x].x += xx[tid_x].x*yy[tid_x].x + xx[tid_x].y*yy[tid_x].y;
+                           d_out[bid2+i*pol_skip+tid_x].y += xx[tid_x].y*yy[tid_x].x - xx[tid_x].x*yy[tid_x].y;
+                         }
+			 __syncthreads();break;
+	}*/
+
+        int bid  = ((bid_x * grid_y + bid_y) * tt  * grid_z  + bid_z) * blk_x ;
 	int bid2 = ((bid_x * grid_y + bid_y) * npol * grid_z  + bid_z) * blk_x ;
 
         #pragma unroll
@@ -64,9 +86,9 @@ __global__ void XGrid_kernel(int npol, int gridsize, int nbatch, int nchan,
 		yy[tid_x] = d_in[bid+i%2*pol_skip+tid_x];
 	        
 		d_out[bid2+i*pol_skip+tid_x].x += xx[tid_x].x*yy[tid_x].x + xx[tid_x].y*yy[tid_x].y;  
-	       	d_out[bid2+i*pol_skip+tid_x].y += xx[tid_x].y*yy[tid_x].x - xx[tid_x].x*xx[tid_x].y;
+	       	d_out[bid2+i*pol_skip+tid_x].y += xx[tid_x].y*yy[tid_x].x - xx[tid_x].x*yy[tid_x].y;
 	}
-	__syncthreads();
+        __syncthreads();
 }
 
 template<typename In, typename Out>
@@ -233,7 +255,7 @@ BFstatus bfxGridExecute(BFxgrid          plan,
     int nbatch = in->shape[1];
     int nchan = in->shape[2];
     int npol = in->shape[3];
-    
+     
     if( in->ndim > 5 ) {
         // Keep the last three dim but attempt to flatten all others
         unsigned long keep_dims_mask = padded_dims_mask(out);
