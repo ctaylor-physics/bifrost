@@ -14,11 +14,17 @@ LIBBIFROST_OBJS = \
   array.o \
   address.o \
   udp_socket.o \
-  udp_capture.o \
-  udp_transmit.o \
+  hw_locality.o \
+  packet_capture.o \
+  packet_writer.o \
   unpack.o \
   quantize.o \
   proclog.o
+ifdef VERBS
+  # These files require IB verbs to compile
+  LIBBIFROST_OBJS += \
+  ib_verbs.o
+endif
 ifndef NOCUDA
   # These files require the CUDA Toolkit to compile
   LIBBIFROST_OBJS += \
@@ -96,6 +102,12 @@ ifdef VMA
   # Requires Mellanox libvma to be installed
   LIB        += -lvma
   CPPFLAGS   += -DBF_VMA_ENABLED=1
+endif
+
+ifdef VERBS
+  # Requires Mellanox libvma to be installed
+  LIB        += -lvma -libverbs
+  CPPFLAGS   += -DBF_VERBS_ENABLED=1
 endif
 
 ifdef ALIGNMENT
