@@ -40,15 +40,10 @@ Implements the Romein convolutional algorithm onto a GPU using CUDA.
 #include "utils.hpp"
 #include "cuda.hpp"
 #include "cuda/stream.hpp"
-
 #include "Complex.hpp"
-
-
 
 #define MAX_THREADS_PER_BLOCK 128
 #define MIN_BLOCKS_PER_MP     4
-
-
 
 struct __attribute__((aligned(1))) nibble2 {
     // Yikes!  This is dicey since the packing order is implementation dependent!  
@@ -65,16 +60,15 @@ __host__ __device__
 inline Complex<RealType> Complexfcma(Complex<RealType> x, Complex<RealType> y, Complex<RealType> d) {
     RealType real_res;
     RealType imag_res;
-    
+
     real_res = (x.x *  y.x) + d.x;
     imag_res = (x.x *  y.y) + d.y;
-            
-    real_res =  (x.y * y.y) + real_res;  
-    imag_res = -(x.y * y.x) + imag_res;          
-     
+
+    real_res =  (x.y * y.y) + real_res;
+    imag_res = -(x.y * y.x) + imag_res;
+
     return Complex<RealType>(real_res, imag_res);
 }
-
 
 
 template<typename InType, typename OutType>
@@ -152,8 +146,9 @@ VGrid_kernel(int   		       nbaseline,
 	        {
                        d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].x+= sum.x;
                        d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].y+= sum.y;   
-                //    atomicAdd(&d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].x, sum.x);
-                //    atomicAdd(&d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].y, sum.y);
+                   
+		   // atomicAdd(&d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].x, sum.x);
+                   // atomicAdd(&d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].y, sum.y);
                 }
 	        // Switch to new point
                 sum = OutType(0.0, 0.0);
@@ -171,9 +166,10 @@ VGrid_kernel(int   		       nbaseline,
             if( grid_point_u >= 0 && grid_point_u < gridsize && \
                 grid_point_v >= 0 && grid_point_v < gridsize ) 
 	    {
-	       d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].x+= sum.x;
-               d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].y+= sum.y;
-      
+          
+                d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].x+= sum.x;
+                d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].y+= sum.y;
+      		    
 //              atomicAdd(&d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].x, sum.x);
 //              atomicAdd(&d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].y, sum.y);
           }

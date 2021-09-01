@@ -1,6 +1,6 @@
 /* 
 
-Implements the grid-Correlation onto a GPU using CUDA. 
+Implements the grid-multiplication onto a GPU using CUDA. 
 
 */
 #include <iostream>
@@ -21,20 +21,6 @@ struct __attribute__((aligned(1))) blenib2 {
     // Yikes!  This is dicey since the packing order is implementation dependent!
     signed char x:4, y:4;
 };
-template<typename RealType>
-__host__ __device__
-inline Complex<RealType> ComplexMul(Complex<RealType> x, Complex<RealType> y, Complex<RealType> d) {
-    RealType real_res;
-    RealType imag_res;
-
-    real_res = (x.x *  y.x) + d.x;
-    imag_res = (x.x *  y.y) + d.y;
-
-    real_res =  (x.y * y.y) + real_res;
-    imag_res = -(x.y * y.x) + imag_res;
-
-    return Complex<RealType>(real_res, imag_res);
-}
 
 template<typename In, typename Out>
 __global__ void XGrid_kernel(int npol, int gridsize, int nbatch, int nchan,
@@ -53,28 +39,6 @@ __global__ void XGrid_kernel(int npol, int gridsize, int nbatch, int nchan,
  
         int tt = 1;
         if(npol>1) tt=(int)npol/2;
-        
-	/*switch(npol){
-	
-		case 1: int bid = ((bid_x * grid_y + bid_y) * npol  * grid_z  + bid_z) * blk_x ;
-			xx[tid_x] = d_in[bid+tid_x];
-                        d_out[bid+tid_x].x += xx[tid_x].x*xx[tid_x].x + xx[tid_x].y*xx[tid_x].y;
-                        d_out[bid+tid_x].y += 0;
-			__syncthreads();break;
-   
-	        default: int bid1  = ((bid_x * grid_y + bid_y) * (int)npol/2  * grid_z  + bid_z) * blk_x ;
-                         int bid2 = ((bid_x * grid_y + bid_y) * npol * grid_z  + bid_z) * blk_x ;
-                         #pragma unroll
-                         for(int i=0;i<npol;i++){
-
-                           xx[tid_x] = d_in[bid1+i/2*pol_skip+tid_x];
-                           yy[tid_x] = d_in[bid1+i%2*pol_skip+tid_x];
-
-                           d_out[bid2+i*pol_skip+tid_x].x += xx[tid_x].x*yy[tid_x].x + xx[tid_x].y*yy[tid_x].y;
-                           d_out[bid2+i*pol_skip+tid_x].y += xx[tid_x].y*yy[tid_x].x - xx[tid_x].x*yy[tid_x].y;
-                         }
-			 __syncthreads();break;
-	}*/
 
         int bid  = ((bid_x * grid_y + bid_y) * tt  * grid_z  + bid_z) * blk_x ;
 	int bid2 = ((bid_x * grid_y + bid_y) * npol * grid_z  + bid_z) * blk_x ;
@@ -257,7 +221,6 @@ BFstatus bfxGridExecute(BFxgrid          plan,
     int npol = in->shape[3];
      
     if( in->ndim > 5 ) {
-        // Keep the last three dim but attempt to flatten all others
         unsigned long keep_dims_mask = padded_dims_mask(out);
         keep_dims_mask |= 0x1 << (in->ndim-1);
         keep_dims_mask |= 0x1 << (in->ndim-2);
@@ -272,7 +235,6 @@ BFstatus bfxGridExecute(BFxgrid          plan,
 
     BFarray out_flattened;
     if( out->ndim > 4 ) {
-        // Keep the last three dim but attempt to flatten all others
         unsigned long keep_dims_mask = padded_dims_mask(out);
         keep_dims_mask |= 0x1 << (out->ndim-1);
         keep_dims_mask |= 0x1 << (out->ndim-2);

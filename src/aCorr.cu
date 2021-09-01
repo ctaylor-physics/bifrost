@@ -84,20 +84,6 @@ struct __attribute__((aligned(1))) blenib2 {
     // Yikes!  This is dicey since the packing order is implementation dependent!
     signed char x:4, y:4;
 };
-template<typename RealType>
-__host__ __device__
-inline Complex<RealType> ComplexMul(Complex<RealType> x, Complex<RealType> y, Complex<RealType> d) {
-    RealType real_res;
-    RealType imag_res;
-
-    real_res = (x.x *  y.x) + d.x;
-    imag_res = (x.x *  y.y) + d.y;
-
-    real_res =  (x.y * y.y) + real_res;
-    imag_res = -(x.y * y.x) + imag_res;
-
-    return Complex<RealType>(real_res, imag_res);
-}
 
 template<typename In, typename Out>
 __global__ void ACorr(int nbaseline, int npol, int nbatch, int nchan,
