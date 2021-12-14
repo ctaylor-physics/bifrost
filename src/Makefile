@@ -31,7 +31,6 @@ ifndef NOCUDA
   aCorr.o \
   VGrid.o \
   XGrid.o \
-  fft_shift.o \
   transpose.o \
   fft.o \
   fft_kernels.o \
