@@ -142,7 +142,7 @@ public:
 	    */
 	    //if( pkt->src < 8 ) { // HACK TESTING
 	    //for( ; chan<32; ++chan ) { // HACK TESTING
-	    for( ; chan<128; ++chan ) { // HACK TESTING pkt->nchan
+	    for( ; chan<pkt->nchan; ++chan ) { // HACK TESTING pkt->nchan
 		    ::memcpy(&out[pkt->src + pkt->nsrc*chan], 
 		             &in[chan], sizeof(otype));
 		    //out[pkt->src + pkt->nsrc*chan] = in[chan];
@@ -159,8 +159,8 @@ public:
 	    typedef aligned256_type otype;
 	    otype* __restrict__ aligned_data = (otype*)data;
 	    for( int t=0; t<nseq; ++t ) {
-		    for( int c=0; c<128; ++c ) {  
-			    ::memset(&aligned_data[src + nsrc*(c + 128*t)],
+		    for( int c=0; c<nchan; ++c ) {  
+			    ::memset(&aligned_data[src + nsrc*(c + nchan*t)],
 			             0, sizeof(otype));
 		    }
 	    }
