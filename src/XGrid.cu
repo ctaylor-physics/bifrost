@@ -105,8 +105,8 @@ public:
    void execute(BFarray const* in, BFarray const* out, int nbatch, int nchan, int npol) {
         BF_TRACE();
         BF_TRACE_STREAM(_stream);
-        BF_ASSERT_EXCEPTION(out->dtype == BF_DTYPE_CF32 \
-                                          || BF_DTYPE_CF64, BF_STATUS_UNSUPPORTED_DTYPE);
+        BF_ASSERT_EXCEPTION((out->dtype == BF_DTYPE_CF32) \
+                                          || (out->dtype == BF_DTYPE_CF64), BF_STATUS_UNSUPPORTED_DTYPE);
         
         BF_CHECK_CUDA_EXCEPTION(cudaGetLastError(), BF_STATUS_INTERNAL_ERROR);
     
