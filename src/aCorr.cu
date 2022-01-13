@@ -25,15 +25,14 @@
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+ */ 
 
-/* 
-
- 
-
-Implements the grid-Correlation onto a GPU using CUDA. 
-
+/*
+ACorr module takes the raw X and Y complex voltages for every frequency channel, 
+time-stamp and polarization to compute full stokes XX*, YY*, XY* and YX* 
+for each antenna by itself.
 */
+
 #include <iostream>
 #include "bifrost/aCorr.h"
 #include "assert.hpp"
@@ -41,39 +40,8 @@ Implements the grid-Correlation onto a GPU using CUDA.
 #include "utils.hpp"
 #include "cuda.hpp"
 #include "cuda/stream.hpp"
-//#include <complex.h>
 #include "Complex.hpp"
-
 #include <thrust/device_vector.h>
-
-#define tile 256 // Number of threads per thread-block
-
-/********************/
-/* CUDA ERROR CHECK */
-/********************/
-#define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
-inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
-{
-   if (code != cudaSuccess) 
-   {
-      fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
-      if (abort) exit(code);
-   }
-}
-
-
-
-inline
-cudaError_t checkCuda(cudaError_t result)
-{
-#if defined(DEBUG) || defined(_DEBUG)
-  if (result != cudaSuccess) {
-    fprintf(stderr, "CUDA Runtime Error: %s\n", cudaGetErrorString(result));
-    assert(result == cudaSuccess);
-  }
-#endif
-  return result;
-}
 
 struct __attribute__((aligned(1))) nibble2 {
     // Yikes!  This is dicey since the packing order is implementation dependent!  
@@ -139,7 +107,7 @@ inline void launch_acorr_kernel(int nantennas, int npol, bool polmajor, int nbat
 		    &d_in,
                     &d_out};
      size_t loc_size=2 * block.x * sizeof(float2);
-; // Shared memory size to be allocated for the kernel
+ // Shared memory size to be allocated for the kernel
 	BF_CHECK_CUDA_EXCEPTION(cudaLaunchKernel((void*)ACorr<In,Out>,
 						 grid, block,
 						 &args[0], loc_size*sizeof(float2), stream),BF_STATUS_INTERNAL_ERROR);
