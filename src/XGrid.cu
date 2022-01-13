@@ -1,6 +1,10 @@
 /* 
 
-Implements the grid-multiplication onto a GPU using CUDA. 
+This module takes in the two-dimensional voltage patterns of the
+X and Y uv-grids to perform element-wise complex multiplication 
+producing the full stokes output sequence in the order XX*, YY*, XY* & YX*.
+The products are estimated for every time-stamp and frequency channel separately 
+which keep accumulating and updated for the specified inegration time in the output.
 
 */
 #include <iostream>
