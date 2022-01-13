@@ -86,7 +86,7 @@ struct __attribute__((aligned(1))) blenib2 {
 };
 
 template<typename In, typename Out>
-__global__ void ACorr(int nbaseline, int npol, int nbatch, int nchan,
+__global__ void ACorr(int nantennas, int npol, int nbatch, int nchan,
 		     In* d_in,
 		     Out* d_out){
 
@@ -143,12 +143,7 @@ inline void launch_acorr_kernel(int nantennas, int npol, bool polmajor, int nbat
 	BF_CHECK_CUDA_EXCEPTION(cudaLaunchKernel((void*)ACorr<In,Out>,
 						 grid, block,
 						 &args[0], loc_size*sizeof(float2), stream),BF_STATUS_INTERNAL_ERROR);
-   
-
-//   BF_CHECK_CUDA_EXCEPTION(cudaDestroyTextureObject(data_in),BF_STATUS_INTERNAL_ERROR);
-
-
-
+  
 }
 
 class BFaCorr_impl {
