@@ -28,7 +28,11 @@
 
 /* 
 
-Implements the Romein convolutional algorithm onto a GPU using CUDA. 
+This module adopts the same work distribution strategy outlined in Romein(2011) to grid 
+raw antenna voltages generating a X- and Y- complex uv grid. It replaces the earlier romein gridding
+kernel as this module implements a higher level of parallelism with improved performance and hence is an 
+upgraded version to the romein_kernel. Note that VGrid is specific to EPIC and cannot be used to grid visibilities
+in its current form.
 
 */
 #include <iostream>
@@ -74,12 +78,9 @@ inline Complex<RealType> Complexfcma(Complex<RealType> x, Complex<RealType> y, C
 template<typename InType, typename OutType>
 __global__ void 
 //__launch_bounds__(MAX_THREADS_PER_BLOCK, MIN_BLOCKS_PER_MP)
-VGrid_kernel(int   		       nbaseline,
-		   int   		       npol,
+VGrid_kernel(      int   		       npol,
 		   int                         maxsupport, 
 		   int                         gridsize, 
-		   int                         nbatch,
-		   int                         nchan,
 		   const int* __restrict__     x,
 		   const int* __restrict__     y,
 		   const int* __restrict__     z,
@@ -139,16 +140,12 @@ VGrid_kernel(int   		       nbaseline,
        	   // If grid-point changes for a given illumination pattern 
 
           if (!(myGridU == grid_point_u && myGridV == grid_point_v)) 
-	  //if(!((myGridU<grid_point_u+0.5)&&(myGridU>=grid_point_u-0.5)&&(myGridV<grid_point_v+0.5)&&(myGridU>=grid_point_u-0.5)))
-	   { // Atomic add to grid is now removed from this kernel after careful examining and consideration for race-conditions
+	  { // Atomic add to grid is now removed from this kernel after careful examining and consideration for race-conditions
                if( grid_point_u >= 0 && grid_point_u < gridsize && \
                     grid_point_v >= 0 && grid_point_v < gridsize ) 
 	        {
                        d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].x+= sum.x;
-                       d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].y+= sum.y;   
-                   
-		   // atomicAdd(&d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].x, sum.x);
-                   // atomicAdd(&d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].y, sum.y);
+                       d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].y+= sum.y;  
                 }
 	        // Switch to new point
                 sum = OutType(0.0, 0.0);
@@ -168,10 +165,7 @@ VGrid_kernel(int   		       nbaseline,
 	    {
           
                 d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].x+= sum.x;
-                d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].y+= sum.y;
-      		    
-//              atomicAdd(&d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].x, sum.x);
-//              atomicAdd(&d_out[grid_s + pol*gridsize*gridsize + gridsize*grid_point_v + grid_point_u].y, sum.y);
+                d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].y+= sum.y
           }
        }/// End of polarization loop
     __syncthreads();
@@ -206,12 +200,9 @@ inline void launch_VGrid_kernel(int      nbaseline,
     if(polmajor)npol=1;
     dim3 grid(nbatch, nchan, grid_z);
     
-    void* args[] = {&nbaseline,
-                    &npol,
+    void* args[] = {&npol,
                     &maxsupport,
                     &gridsize, 
-                    &nbatch,
-		    &nchan,
                     &xpos,
                     &ypos,
                     &zpos,
