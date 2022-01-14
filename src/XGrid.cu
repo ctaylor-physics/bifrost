@@ -29,7 +29,7 @@
 
 /* 
 
-This module takes in the two-dimensional voltage patterns of the
+The XGrid module takes in the two-dimensional voltage patterns of the
 X and Y uv-grids to perform element-wise complex multiplication 
 producing the full stokes output sequence in the order XX*, YY*, XY* & YX*.
 The products are estimated for every time-stamp and frequency channel separately 
@@ -56,7 +56,7 @@ struct __attribute__((aligned(1))) blenib2 {
 };
 
 template<typename In, typename Out>
-__global__ void XGrid_kernel(int npol, int gridsize, int nbatch, int nchan,
+__global__ void XGrid_kernel(int npol,
 		     const In* __restrict__  d_in,
                      Out* d_out){
 
@@ -106,9 +106,6 @@ inline void launch_xgrid_kernel(int npol, bool polmajor, int gridsize, int nbatc
     dim3 grid(nbatch, nchan, grid_z);
 
     void* args[] = {&npol,
-                    &gridsize, 
-                    &nbatch,
-		    &nchan,
 		    &d_in,
                     &d_out};
     size_t loc_size=2*block.x;
