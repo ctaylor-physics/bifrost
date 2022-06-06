@@ -165,7 +165,7 @@ VGrid_kernel(      int   		       npol,
 	    {
           
                 d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].x+= sum.x;
-                d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].y+= sum.y
+                d_out[grid_s + pol*gridsize*gridsize + gridsize*int(grid_point_v) + int(grid_point_u)].y+= sum.y;
           }
        }/// End of polarization loop
     __syncthreads();
