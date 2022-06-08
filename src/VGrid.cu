@@ -65,6 +65,8 @@ inline Complex<RealType> Complexfcma(Complex<RealType> x, Complex<RealType> y, C
     RealType real_res;
     RealType imag_res;
 
+    // This function is used to grid voltages, where we want the kernel (x) to be conjugated.
+    // So here we do conj(x) * y
     real_res = (x.x *  y.x) + d.x;
     imag_res = (x.x *  y.y) + d.y;
 
